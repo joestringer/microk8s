@@ -12,4 +12,4 @@ fi
 
 source $SNAP/actions/common/utils.sh
 exit_if_stopped
-"${SNAP_DATA}/bin/cilium" "$@"
+"${SNAP_DATA}/bin/cilium" -H "unix:///var/snap/microk8s/current/var/run/cilium/cilium.sock" "$@"

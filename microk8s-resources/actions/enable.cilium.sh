@@ -16,6 +16,18 @@ echo "Restarting kube-apiserver"
 refresh_opt_in_config "allow-privileged" "true" kube-apiserver
 sudo systemctl restart snap.${SNAP_NAME}.daemon-apiserver
 
+# Reconfigure kubelet/containerd to pick up the new CNI config and binary.
+echo "Restarting kubelet"
+refresh_opt_in_config "network-plugin" "cni" kubelet
+refresh_opt_in_config "cni-bin-dir" "\${SNAP_DATA}/opt/cni/bin/" kubelet
+sudo systemctl restart snap.${SNAP_NAME}.daemon-kubelet
+
+if grep -qE "bin_dir.*SNAP}\/" $SNAP_DATA/args/containerd-template.toml; then
+  echo "Restarting containerd"
+  sudo "${SNAP}/bin/sed" -i 's;bin_dir = "${SNAP}/opt;bin_dir = "${SNAP_DATA}/opt;g' "$SNAP_DATA/args/containerd-template.toml"
+  sudo systemctl restart snap.${SNAP_NAME}.daemon-containerd
+fi
+
 echo "Enabling Cilium"
 
 read -ra CILIUM_VERSION <<< "$1"
@@ -61,7 +73,7 @@ else
   sudo mkdir -p "$SNAP_DATA/actions/cilium/"
   sudo cp "$SNAP_DATA/tmp/cilium/$CILIUM_DIR/install/kubernetes/cilium.yaml" "$SNAP_DATA/actions/cilium.yaml"
   sudo sed -i 's;path: \(/var/run/cilium\);path: '"$SNAP_DATA"'\1;g' "$SNAP_DATA/actions/cilium.yaml"
-  sudo sed -i 's;path: \(/sys/fs/bpf\);path: '"$SNAP_DATA"'\1;g' "$SNAP_DATA/actions/cilium.yaml"
+  #sudo sed -i 's;path: \(/sys/fs/bpf\);path: '"$SNAP_DATA"'\1;g' "$SNAP_DATA/actions/cilium.yaml"
 
   microk8s.status --wait-ready >/dev/null
   echo "Deploying $SNAP_DATA/actions/cilium.yaml. This may take several minutes."
@@ -80,16 +92,5 @@ else
 
   sudo rm -rf "$SNAP_DATA/tmp/cilium"
 fi
-
-# Reconfigure kubelet/containerd to pick up the new CNI config and binary.
-echo "Restarting kubelet"
-refresh_opt_in_config "network-plugin" "cni" kubelet
-refresh_opt_in_config "cni-bin-dir" "\${SNAP_DATA}/opt/cni/bin/" kubelet
-sudo systemctl restart snap.${SNAP_NAME}.daemon-kubelet
-echo "Restarting containerd"
-if grep -qE "bin_dir.*SNAP}\/" $SNAP_DATA/args/containerd-template.toml; then
-  sudo "${SNAP}/bin/sed" -i 's;bin_dir = "${SNAP}/opt;bin_dir = "${SNAP_DATA}/opt;g' "$SNAP_DATA/args/containerd-template.toml"
-fi
-sudo systemctl restart snap.${SNAP_NAME}.daemon-containerd
 
 echo "Cilium is enabled"

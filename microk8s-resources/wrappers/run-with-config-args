@@ -39,6 +39,9 @@ then
     refresh_opt_in_config "kubelet-cgroups" "/systemd/system.slice" kubelet
   fi
 
+  # Export Cilium socket path correctly for CNI
+  export CILIUM_SOCK=${SNAP_DATA}/var/run/cilium/cilium.sock
+
 elif [ "${app}" = "kube-apiserver" ] || [ "${app}" = "kube-proxy" ]
 then
   # Check if we advertise an address. If we do we do not need to wait for a default network interface.
