@@ -12,8 +12,11 @@ then
 
   sudo rm -f "$SNAP_DATA/args/cni-network/05-cilium-cni.conf"
   sudo rm -f "$SNAP_DATA/opt/cni/bin/cilium-cni"
-  sudo rm -f "$SNAP_DATA/bin/cilium"
+  sudo rm -rf $SNAP_DATA/bin/cilium*
   sudo rm -f "$SNAP_DATA/actions/cilium.yaml"
+  sudo rm -rf "$SNAP_DATA/actions/cilium"
+  sudo rm -rf "$SNAP_DATA/var/run/cilium"
+  sudo rm -rf "$SNAP_DATA/sys/fs/bpf"
 
   echo "Restarting kubelet"
   refresh_opt_in_config "network-plugin" "kubenet" kubelet
@@ -26,4 +29,9 @@ then
   sudo systemctl restart snap.${SNAP_NAME}.daemon-containerd
 
   echo "Cilium is terminating"
+  cilium=$(wait_for_service_shutdown "kube-system" "k8s-app=cilium")
+  if [[ $cilium == fail ]]
+  then
+    echo "Cilium did not shut down on time. Proceeding."
+  fi
 fi
