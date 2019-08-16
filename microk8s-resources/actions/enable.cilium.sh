@@ -24,8 +24,10 @@ if [ -z "$CILIUM_VERSION" ]; then
 fi
 CILIUM_ERSION=$(echo $CILIUM_VERSION | sed 's/v//g')
 
-if [ ! -f "${SNAP_DATA}/bin/cilium-$CILIUM_ERSION" ]
+if [ -f "${SNAP_DATA}/bin/cilium-$CILIUM_ERSION" ]
 then
+  echo "Cilium version $CILIUM_VERSION is already installed."
+else
   CILIUM_DIR="cilium-$CILIUM_ERSION"
   SOURCE_URI="https://github.com/cilium/cilium/archive"
   CILIUM_CNI_CONF="plugins/cilium-cni/05-cilium-cni.conf"
@@ -62,6 +64,7 @@ then
   sudo sed -i 's;path: \(/sys/fs/bpf\);path: '"$SNAP_DATA"'\1;g' "$SNAP_DATA/actions/cilium.yaml"
 
   microk8s.status --wait-ready >/dev/null
+  echo "Deploying $SNAP_DATA/actions/cilium.yaml. This may take several minutes."
   "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" apply -f "$SNAP_DATA/actions/cilium.yaml"
   "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" -n $NAMESPACE rollout status ds/cilium
 
