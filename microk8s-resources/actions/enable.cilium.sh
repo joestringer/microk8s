@@ -2,8 +2,9 @@
 
 set -e
 
-source $SNAP/actions/common/utils.sh
+DEV_CLI="/home/joe/git/cilium-cli/cilium"
 
+source $SNAP/actions/common/utils.sh
 CA_CERT=/snap/core18/current/etc/ssl/certs/ca-certificates.crt
 
 ARCH=$(arch)
@@ -38,20 +39,27 @@ read -ra CILIUM_VERSION <<< "$1"
 
 if [ -f "${SNAP_DATA}/bin/cilium" ]
 then
+  echo "TODO: Cilium CLI update checker"
   echo "Cilium is already installed, use microk8s.cilium to upgrade."
 else
   SOURCE_URI="https://github.com/cilium/cilium-cli/releases/latest/download/"
   NAMESPACE=kube-system
 
   echo "Fetching the latest cilium command line client."
-  run_with_sudo mkdir -p "${SNAP_DATA}/tmp/cilium"
-  (cd "${SNAP_DATA}/tmp/cilium"
-  run_with_sudo "${SNAP}/usr/bin/curl" --cacert $CA_CERT -L $SOURCE_URI/cilium-linux-${ARCH}.tar.gz -o "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
-  run_with_sudo gzip -f -d "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
-  run_with_sudo tar -xf "$SNAP_DATA/tmp/cilium/cilium.tar")
+  if [ -z $DEV_CLI ]; then
+    run_with_sudo mkdir -p "${SNAP_DATA}/tmp/cilium"
+    (cd "${SNAP_DATA}/tmp/cilium"
+    run_with_sudo "${SNAP}/usr/bin/curl" --cacert $CA_CERT -L $SOURCE_URI/cilium-linux-${ARCH}.tar.gz -o "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
+    run_with_sudo gzip -f -d "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
+    run_with_sudo tar -xf "$SNAP_DATA/tmp/cilium/cilium.tar")
+  fi
 
   run_with_sudo mkdir -p "$SNAP_DATA/bin/"
-  run_with_sudo mv "$SNAP_DATA/tmp/cilium/cilium" "$SNAP_DATA/bin/cilium"
+  if [ -n $DEV_CLI ]; then
+    run_with_sudo cp "" "$SNAP_DATA/bin/cilium"
+  else
+    run_with_sudo mv "$SNAP_DATA/tmp/cilium/cilium" "$SNAP_DATA/bin/cilium"
+  fi
   run_with_sudo chmod +x "$SNAP_DATA/bin"
   run_with_sudo chmod +x "$SNAP_DATA/bin/cilium"
 
