@@ -7,12 +7,11 @@ source $SNAP/actions/common/utils.sh
 CA_CERT=/snap/core18/current/etc/ssl/certs/ca-certificates.crt
 
 ARCH=$(arch)
+# TODO: Remove when Cilium v1.10 is released
 if ! [ "${ARCH}" = "amd64" ]; then
   echo "Cilium is not available for ${ARCH}" >&2
   exit 1
 fi
-
-"$SNAP/microk8s-enable.wrapper" helm3
 
 echo "Restarting kube-apiserver"
 refresh_opt_in_config "allow-privileged" "true" kube-apiserver
@@ -36,56 +35,38 @@ fi
 echo "Enabling Cilium"
 
 read -ra CILIUM_VERSION <<< "$1"
-if [ -z "$CILIUM_VERSION" ]; then
-  CILIUM_VERSION="v1.8"
-fi
-CILIUM_ERSION=$(echo $CILIUM_VERSION | sed 's/v//g')
 
-if [ -f "${SNAP_DATA}/bin/cilium-$CILIUM_ERSION" ]
+if [ -f "${SNAP_DATA}/bin/cilium" ]
 then
-  echo "Cilium version $CILIUM_VERSION is already installed."
+  echo "Cilium is already installed, use microk8s.cilium to upgrade."
 else
-  CILIUM_DIR="cilium-$CILIUM_ERSION"
-  SOURCE_URI="https://github.com/cilium/cilium/archive"
-  CILIUM_CNI_CONF="plugins/cilium-cni/05-cilium-cni.conf"
-  CILIUM_LABELS="k8s-app=cilium"
+  SOURCE_URI="https://github.com/cilium/cilium-cli/releases/latest/download/"
   NAMESPACE=kube-system
 
-  echo "Fetching cilium version $CILIUM_VERSION."
+  echo "Fetching the latest cilium command line client."
   run_with_sudo mkdir -p "${SNAP_DATA}/tmp/cilium"
   (cd "${SNAP_DATA}/tmp/cilium"
-  run_with_sudo "${SNAP}/usr/bin/curl" --cacert $CA_CERT -L $SOURCE_URI/$CILIUM_VERSION.tar.gz -o "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
-  if ! run_with_sudo gzip -f -d "$SNAP_DATA/tmp/cilium/cilium.tar.gz"; then
-    echo "Invalid version \"$CILIUM_VERSION\". Must be a branch on https://github.com/cilium/cilium."
-    exit 1
-  fi
-  run_with_sudo tar -xf "$SNAP_DATA/tmp/cilium/cilium.tar" "$CILIUM_DIR/install" "$CILIUM_DIR/$CILIUM_CNI_CONF")
+  run_with_sudo "${SNAP}/usr/bin/curl" --cacert $CA_CERT -L $SOURCE_URI/cilium-linux-${ARCH}.tar.gz -o "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
+  run_with_sudo gzip -f -d "$SNAP_DATA/tmp/cilium/cilium.tar.gz"
+  run_with_sudo tar -xf "$SNAP_DATA/tmp/cilium/cilium.tar")
 
+  run_with_sudo mkdir -p "$SNAP_DATA/bin/"
+  run_with_sudo mv "$SNAP_DATA/tmp/cilium/cilium" "$SNAP_DATA/bin/cilium"
+  run_with_sudo chmod +x "$SNAP_DATA/bin"
+  run_with_sudo chmod +x "$SNAP_DATA/bin/cilium"
+
+  # TODO: Remove when Cilium v1.10 is released
   run_with_sudo mv "$SNAP_DATA/args/cni-network/cni.conf" "$SNAP_DATA/args/cni-network/10-kubenet.conf" 2>/dev/null || true
   run_with_sudo mv "$SNAP_DATA/args/cni-network/flannel.conflist" "$SNAP_DATA/args/cni-network/20-flanneld.conflist" 2>/dev/null || true
-  run_with_sudo cp "$SNAP_DATA/tmp/cilium/$CILIUM_DIR/$CILIUM_CNI_CONF" "$SNAP_DATA/args/cni-network/05-cilium-cni.conf"
-
-  run_with_sudo mkdir -p "$SNAP_DATA/actions/cilium/"
-
-  # Generate the YAMLs for Cilium and apply them
-  (cd "${SNAP_DATA}/tmp/cilium/$CILIUM_DIR/install/kubernetes"
-  ${SNAP_DATA}/bin/helm3 template cilium \
-      --namespace $NAMESPACE \
-      --set global.cni.confPath="$SNAP_DATA/args/cni-network" \
-      --set global.cni.binPath="$SNAP_DATA/opt/cni/bin" \
-      --set global.cni.customConf=true \
-      --set global.containerRuntime.integration="containerd" \
-      --set global.containerRuntime.socketPath="$SNAP_COMMON/run/containerd.sock" \
-      --set global.daemon.runPath="$SNAP_DATA/var/run/cilium" \
-      --set operator.numReplicas=1 \
-      --set agent.keepDeprecatedLabels=true \
-      | run_with_sudo tee "$SNAP_DATA/actions/cilium.yaml" >/dev/null)
 
   ${SNAP}/microk8s-status.wrapper --wait-ready >/dev/null
-  echo "Deploying $SNAP_DATA/actions/cilium.yaml. This may take several minutes."
-  "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" apply -f "$SNAP_DATA/actions/cilium.yaml"
-  "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" -n $NAMESPACE rollout status ds/cilium
+  if [ -z "$CILIUM_VERSION" ]; then
+    KUBECONFIG="$SNAP_DATA/credentials/client.config" ${SNAP_DATA}/bin/cilium install --wait
+  else
+    KUBECONFIG="$SNAP_DATA/credentials/client.config" ${SNAP_DATA}/bin/cilium install --wait --version "v$(echo $CILIUM_VERSION | sed 's/^v//')"
+  fi
 
+  # TODO: Remove when Cilium v1.10 is released
   if [ -e "$SNAP_DATA/args/cni-network/cni.yaml" ]
   then
     "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" delete -f "$SNAP_DATA/args/cni-network/cni.yaml"
@@ -94,17 +75,9 @@ else
     run_with_sudo mv "$SNAP_DATA/args/cni-network/cni.yaml" "$SNAP_DATA/args/cni-network/cni.yaml.disabled"
   fi
 
-  # Fetch the Cilium CLI binary and install
-  CILIUM_POD=$("$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" -n $NAMESPACE get pod -l $CILIUM_LABELS -o jsonpath="{.items[0].metadata.name}")
-  CILIUM_BIN=$(mktemp)
-  "$SNAP/kubectl" "--kubeconfig=$SNAP_DATA/credentials/client.config" -n $NAMESPACE cp $CILIUM_POD:/usr/bin/cilium $CILIUM_BIN >/dev/null
-  run_with_sudo mkdir -p "$SNAP_DATA/bin/"
-  run_with_sudo mv $CILIUM_BIN "$SNAP_DATA/bin/cilium-$CILIUM_ERSION"
-  run_with_sudo chmod +x "$SNAP_DATA/bin/"
-  run_with_sudo chmod +x "$SNAP_DATA/bin/cilium-$CILIUM_ERSION"
-  run_with_sudo ln -s $SNAP_DATA/bin/cilium-$CILIUM_ERSION $SNAP_DATA/bin/cilium
+  run_with_sudo rm -rf -- "$SNAP_DATA/tmp/cilium"
 
-  run_with_sudo rm -rf "$SNAP_DATA/tmp/cilium"
+  KUBECONFIG="$SNAP_DATA/credentials/client.config" ${SNAP_DATA}/bin/cilium status --wait
 fi
 
 echo "Cilium is enabled"
